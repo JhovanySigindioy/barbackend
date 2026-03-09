@@ -69,56 +69,15 @@ export const getSalesReport = async (period: 'day' | 'week' | 'month' | 'total')
     LIMIT 12
   `;
 
-  const catQuery = `
-    SELECT 
-      p.category,
-      SUM(oi.quantity * oi.price_at_time) as revenue
-    FROM order_items oi
-    JOIN products p ON oi.product_id = p.id
-    JOIN orders o ON oi.order_id = o.id
-    WHERE o.status = 'closed'
-    ${period !== 'total' ? `AND o.created_at >= NOW() - ${interval}` : ''}
-    GROUP BY p.category
-    ORDER BY revenue DESC
-  `;
-
-  const dailyTrendQuery = `
-    SELECT 
-      TO_CHAR(created_at, 'DD/MM') as date,
-      SUM(total) as revenue
-    FROM orders
-    WHERE status = 'closed'
-    ${period !== 'total' ? `AND created_at >= NOW() - ${interval}` : ''}
-    GROUP BY date
-    ORDER BY date ASC
-  `;
-
-  const hourlyQuery = `
-    SELECT 
-      EXTRACT(HOUR FROM created_at) as hour,
-      SUM(total) as revenue
-    FROM orders
-    WHERE status = 'closed'
-    AND created_at >= NOW() - INTERVAL '24 hours'
-    GROUP BY hour
-    ORDER BY hour ASC
-  `;
-
   const stats = await dbPool.query(query);
   const payments = await dbPool.query(paymentsQuery);
   const topProducts = await dbPool.query(topProductsQuery);
   const monthlyTrend = await dbPool.query(monthlyTrendQuery);
-  const categoryStats = await dbPool.query(catQuery);
-  const dailyTrend = await dbPool.query(dailyTrendQuery);
-  const hourlyStats = await dbPool.query(hourlyQuery);
 
   return {
     summary: stats.rows[0],
     payments: payments.rows,
     topProducts: topProducts.rows,
     monthlyTrend: monthlyTrend.rows,
-    categoryStats: categoryStats.rows,
-    dailyTrend: dailyTrend.rows,
-    hourlyStats: hourlyStats.rows
   };
 };

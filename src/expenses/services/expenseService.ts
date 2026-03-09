@@ -1,7 +1,14 @@
 import { dbPool } from '../../config/database.js';
 
-export const getAllExpenses = async () => {
-    const result = await dbPool.query("SELECT * FROM expenses ORDER BY date DESC, created_at DESC");
+export const getAllExpenses = async (month?: string) => {
+    let query = "SELECT * FROM expenses ";
+    const params = [];
+    if (month) {
+        query += "WHERE TO_CHAR(date, 'YYYY-MM') = $1 ";
+        params.push(month);
+    }
+    query += "ORDER BY date DESC, created_at DESC";
+    const result = await dbPool.query(query, params);
     return result.rows;
 };
 

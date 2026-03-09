@@ -3,34 +3,52 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: 'postgres', // Connect to default postgres DB first to create our app DB
-});
+const isProduction = process.env.NODE_ENV === 'production';
 
-export const dbPool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+// Configuration for database management (optional CREATE DATABASE)
+// In production/cloud, we typically use the same connection string for everything.
+const adminConfig = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL, ssl: isProduction ? { rejectUnauthorized: false } : false }
+  : {
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: 'postgres',
+  };
+
+const pool = new Pool(adminConfig);
+
+// Configuration for the application pool
+const appConfig = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL, ssl: isProduction ? { rejectUnauthorized: false } : false }
+  : {
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+  };
+
+export const dbPool = new Pool(appConfig);
 
 export const initDatabase = async () => {
-  const dbName = process.env.DB_NAME;
+  const dbName = process.env.DB_NAME || 'bar_dbs';
 
   try {
-    // 1. Check if database exists
-    const checkDb = await pool.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
-
-    if (checkDb.rowCount === 0) {
-      console.log(`Creating database ${dbName}...`);
-      await pool.query(`CREATE DATABASE ${dbName}`);
+    // 1. Try to create database only if not using DATABASE_URL (mostly for local dev)
+    if (!process.env.DATABASE_URL) {
+      const checkDb = await pool.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
+      if (checkDb.rowCount === 0) {
+        console.log(`Creating database ${dbName}...`);
+        await pool.query(`CREATE DATABASE ${dbName}`);
+      }
     }
+  } catch (err) {
+    console.log('Note: Database existence check/creation skipped or failed (common in managed DBs/Render)');
+  }
 
+  try {
     // 2. Initialize Tables on the application DB
     console.log(`Initializing tables in ${dbName}...`);
 
@@ -125,6 +143,30 @@ export const initDatabase = async () => {
       await dbPool.query("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost_at_time DECIMAL(10,2) DEFAULT 0");
     } catch (e) {
       console.log("cost_at_time column already exists or error adding it");
+    }
+
+    // Inventory movements table (History of stock changes)
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS inventory_movements (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+        type VARCHAR(10) NOT NULL, -- 'in' (entry), 'out' (exit/adjustment)
+        quantity INTEGER NOT NULL,
+        reason VARCHAR(255), -- 'purchase', 'sale', 'adjustment', 'waste'
+        unit_cost DECIMAL(10,2), -- Cost at the time of movement
+        total_cost DECIMAL(10,2), -- total = qty * unit_cost
+        expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Ensure expense_id and costs exist for inventory_movements
+    try {
+      await dbPool.query("ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL");
+      await dbPool.query("ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(10,2)");
+      await dbPool.query("ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS total_cost DECIMAL(10,2)");
+    } catch (e) {
+      console.log("Columns already exist or error adding them to inventory_movements");
     }
 
     // Insert default admin if not exists

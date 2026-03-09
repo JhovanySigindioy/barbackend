@@ -1,9 +1,20 @@
 import { dbPool } from '../../config/database.js';
 
-export const updateProduct = async (id: number | string, data: { name: string, price: number, cost_price?: number, category: string, stock: number, image?: string }) => {
+interface UpdateData {
+    name: string;
+    price: number;
+    category: string;
+    image?: string;
+}
+
+export const updateProduct = async (id: number | string, data: UpdateData) => {
+    // We EXCLUDE stock and cost_price from manual editing to maintain financial integrity.
+    // Stock and cost changes MUST be recorded through 'inventory/restock' to generate expenses.
     const result = await dbPool.query(
-        "UPDATE products SET name = $1, price = $2, cost_price = $3, category = $4, stock = $5, image = $6 WHERE id = $7 RETURNING *",
-        [data.name, data.price, data.cost_price || 0, data.category, data.stock, data.image || '', id]
+        "UPDATE products SET name = $1, price = $2, category = $3, image = $4 WHERE id = $5 RETURNING *",
+        [data.name, data.price, data.category, data.image || '', id]
     );
+
+    if (result.rowCount === 0) throw new Error('Producto no encontrado');
     return result.rows[0];
 };

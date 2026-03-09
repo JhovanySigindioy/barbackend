@@ -3,7 +3,8 @@ import * as expenseService from '../services/expenseService.js';
 
 export const getExpenses = async (req: Request, res: Response) => {
     try {
-        const expenses = await expenseService.getAllExpenses();
+        const month = req.query.month as string;
+        const expenses = await expenseService.getAllExpenses(month);
         res.json(expenses);
     } catch (err) {
         console.error('Error fetching expenses:', err);
